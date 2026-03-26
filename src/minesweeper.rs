@@ -279,3 +279,333 @@ impl MinesweeperBoard {
         neighbors
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn board_with_mines(width: u16, height: u16, mines: &[(usize, usize)]) -> MinesweeperBoard {
+        let mut board = MinesweeperBoard::new(width, height, mines.len());
+        board.first_click = false;
+
+        for &(x, y) in mines {
+            board.cells[x][y].mine = true;
+        }
+
+        recompute_neighbors(&mut board);
+        board
+    }
+
+    fn recompute_neighbors(board: &mut MinesweeperBoard) {
+        for x in 0..board.width() {
+            for y in 0..board.height() {
+                board.cells[x][y].neighbor_mines = if board.cells[x][y].mine {
+                    0
+                } else {
+                    board.count_mine_neighbors(x as u16, y as u16)
+                };
+            }
+        }
+    }
+
+    fn sorted(mut cells: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+        cells.sort_unstable();
+        cells
+    }
+
+    #[test]
+    fn new_board_starts_with_expected_dimensions_and_counts() {
+        let board = MinesweeperBoard::new(8, 10, 12);
+
+        assert_eq!(board.width(), 8);
+        assert_eq!(board.height(), 10);
+        assert_eq!(board.mine_count(), 12);
+        assert_eq!(board.flags_placed(), 0);
+        assert!(board.first_click);
+    }
+
+    #[test]
+    fn place_mines_respects_safe_zone_and_total_count() {
+        let mut board = MinesweeperBoard::new(6, 6, 8);
+
+        board.place_mines(2, 2);
+
+        let total_mines = board
+            .cells
+            .iter()
+            .flatten()
+            .filter(|cell| cell.mine)
+            .count();
+        assert_eq!(total_mines, 8);
+
+        for x in 1..=3 {
+            for y in 1..=3 {
+                assert!(!board.cells[x][y].mine);
+            }
+        }
+
+        for x in 0..board.width() {
+            for y in 0..board.height() {
+                if !board.cells[x][y].mine {
+                    assert_eq!(
+                        board.cells[x][y].neighbor_mines,
+                        board.count_mine_neighbors(x as u16, y as u16)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn is_revealed_and_is_flagged_reflect_cell_state() {
+        let mut board = MinesweeperBoard::new(2, 2, 0);
+        board.cells[1][0].revealed = true;
+        board.cells[0][1].flagged = true;
+
+        assert!(board.is_revealed(1, 0));
+        assert!(!board.is_revealed(0, 0));
+        assert!(board.is_flagged(0, 1));
+        assert!(!board.is_flagged(1, 1));
+    }
+
+    #[test]
+    fn cell_snapshot_maps_internal_state_to_public_state() {
+        let mut board = MinesweeperBoard::new(3, 2, 0);
+        board.cells[0][0].flagged = true;
+        board.cells[1][0].revealed = true;
+        board.cells[1][0].neighbor_mines = 2;
+        board.cells[2][0].revealed = true;
+        board.cells[2][0].mine = true;
+        board.cells[0][1].revealed = true;
+
+        assert!(matches!(
+            board.cell_snapshot(0, 0).state,
+            CellState::Flagged
+        ));
+        assert!(matches!(
+            board.cell_snapshot(1, 0).state,
+            CellState::RevealedNumber(2)
+        ));
+        assert!(matches!(
+            board.cell_snapshot(2, 0).state,
+            CellState::RevealedMine
+        ));
+        assert!(matches!(
+            board.cell_snapshot(0, 1).state,
+            CellState::RevealedEmpty
+        ));
+        assert!(matches!(
+            board.cell_snapshot(1, 1).state,
+            CellState::Hidden
+        ));
+    }
+
+    #[test]
+    fn reveal_at_ignores_flagged_and_revealed_cells() {
+        let mut board = MinesweeperBoard::new(2, 2, 0);
+        board.first_click = false;
+        board.cells[0][0].flagged = true;
+        board.cells[1][1].revealed = true;
+
+        assert!(matches!(board.reveal_at(0, 0), RevealOutcome::Ignored));
+        assert!(matches!(board.reveal_at(1, 1), RevealOutcome::Ignored));
+    }
+
+    #[test]
+    fn reveal_at_places_mines_on_first_click_and_reveals_safe_cell() {
+        let mut board = MinesweeperBoard::new(6, 6, 5);
+
+        let outcome = board.reveal_at(2, 2);
+
+        assert!(matches!(outcome, RevealOutcome::Safe));
+        assert!(!board.first_click);
+        assert!(board.is_revealed(2, 2));
+
+        let total_mines = board
+            .cells
+            .iter()
+            .flatten()
+            .filter(|cell| cell.mine)
+            .count();
+        assert_eq!(total_mines, 5);
+    }
+
+    #[test]
+    fn reveal_returns_true_and_reveals_all_mines_when_hitting_a_mine() {
+        let mut board = board_with_mines(3, 3, &[(0, 0), (2, 2)]);
+
+        assert!(board.reveal(0, 0));
+        assert!(board.cells[0][0].revealed);
+        assert!(board.cells[2][2].revealed);
+    }
+
+    #[test]
+    fn reveal_flood_fills_empty_region_but_leaves_flagged_cells_hidden() {
+        let mut board = board_with_mines(4, 4, &[(3, 3)]);
+        board.cells[1][1].flagged = true;
+
+        assert!(!board.reveal(0, 0));
+        assert!(board.cells[0][0].revealed);
+        assert!(board.cells[2][2].revealed);
+        assert!(!board.cells[1][1].revealed);
+    }
+
+    #[test]
+    fn flood_fill_reveals_border_numbers_around_empty_area() {
+        let mut board = board_with_mines(4, 4, &[(3, 3)]);
+
+        board.flood_fill(0, 0);
+
+        assert!(board.cells[2][2].revealed);
+        assert_eq!(board.cells[2][2].neighbor_mines, 1);
+        assert!(!board.cells[3][3].revealed);
+    }
+
+    #[test]
+    fn toggle_flag_updates_flag_count_and_ignores_revealed_cells() {
+        let mut board = MinesweeperBoard::new(2, 2, 0);
+        board.cells[1][1].revealed = true;
+
+        board.toggle_flag(0, 0);
+        assert!(board.is_flagged(0, 0));
+        assert_eq!(board.flags_placed(), 1);
+
+        board.toggle_flag(0, 0);
+        assert!(!board.is_flagged(0, 0));
+        assert_eq!(board.flags_placed(), 0);
+
+        board.toggle_flag(1, 1);
+        assert_eq!(board.flags_placed(), 0);
+    }
+
+    #[test]
+    fn check_win_only_succeeds_when_all_safe_cells_are_revealed() {
+        let mut board = board_with_mines(2, 2, &[(1, 1)]);
+        assert!(!board.check_win());
+
+        board.cells[0][0].revealed = true;
+        board.cells[0][1].revealed = true;
+        assert!(!board.check_win());
+
+        board.cells[1][0].revealed = true;
+        assert!(board.check_win());
+    }
+
+    #[test]
+    fn adjacent_flag_count_counts_only_neighboring_flags() {
+        let mut board = MinesweeperBoard::new(3, 3, 0);
+        board.cells[0][0].flagged = true;
+        board.cells[2][1].flagged = true;
+        board.cells[2][2].flagged = true;
+
+        assert_eq!(board.adjacent_flag_count(1, 1), 3);
+        assert_eq!(board.adjacent_flag_count(0, 2), 0);
+    }
+
+    #[test]
+    fn hidden_unflagged_neighbors_excludes_revealed_and_flagged_cells() {
+        let mut board = MinesweeperBoard::new(3, 3, 0);
+        board.cells[0][0].revealed = true;
+        board.cells[1][0].flagged = true;
+
+        let neighbors = sorted(board.hidden_unflagged_neighbors(1, 1));
+
+        assert_eq!(
+            neighbors,
+            vec![(0, 1), (0, 2), (1, 2), (2, 0), (2, 1), (2, 2)]
+        );
+    }
+
+    #[test]
+    fn chord_hint_cells_returns_hidden_neighbors_for_revealed_number() {
+        let mut board = board_with_mines(3, 3, &[(0, 0)]);
+        board.cells[1][1].revealed = true;
+        board.cells[0][1].flagged = true;
+
+        let hinted = sorted(board.chord_hint_cells(1, 1));
+
+        assert_eq!(
+            hinted,
+            vec![(0, 0), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1), (2, 2)]
+        );
+    }
+
+    #[test]
+    fn chord_hint_cells_returns_empty_for_non_revealed_or_zero_cells() {
+        let mut board = MinesweeperBoard::new(3, 3, 0);
+        board.cells[1][1].revealed = true;
+
+        assert!(board.chord_hint_cells(0, 0).is_empty());
+        assert!(board.chord_hint_cells(1, 1).is_empty());
+    }
+
+    #[test]
+    fn chord_reveal_candidates_require_matching_flag_count() {
+        let mut board = board_with_mines(3, 3, &[(0, 0), (2, 2)]);
+        board.cells[1][1].revealed = true;
+        board.cells[0][0].flagged = true;
+
+        assert!(board.chord_reveal_candidates(1, 1).is_empty());
+
+        board.cells[2][2].flagged = true;
+        let candidates = sorted(board.chord_reveal_candidates(1, 1));
+        assert_eq!(
+            candidates,
+            vec![(0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1)]
+        );
+    }
+
+    #[test]
+    fn chord_reveals_candidates_and_reports_mine_hit() {
+        let mut board = board_with_mines(3, 3, &[(0, 0)]);
+        board.cells[1][1].revealed = true;
+        board.cells[0][0].flagged = true;
+
+        assert!(!board.chord(1, 1));
+        assert!(board.cells[2][2].revealed);
+
+        board.cells[0][0].flagged = false;
+        board.cells[2][2].revealed = false;
+
+        assert!(board.reveal(1, 1) == false);
+        board.cells[1][1].revealed = true;
+        board.cells[0][0].flagged = true;
+    }
+
+    #[test]
+    fn chord_hits_mine_when_flags_match_but_are_wrong() {
+        let mut board = board_with_mines(3, 3, &[(0, 0)]);
+        board.cells[1][1].revealed = true;
+        board.cells[0][1].flagged = true;
+
+        assert!(board.chord(1, 1));
+        assert!(board.cells[0][0].revealed);
+    }
+
+    #[test]
+    fn reveal_all_mines_reveals_every_mine_only() {
+        let mut board = board_with_mines(3, 3, &[(0, 0), (2, 2)]);
+
+        board.reveal_all_mines();
+
+        assert!(board.cells[0][0].revealed);
+        assert!(board.cells[2][2].revealed);
+        assert!(!board.cells[1][1].revealed);
+    }
+
+    #[test]
+    fn neighbor_positions_stays_in_bounds_for_corner_and_center() {
+        let board = MinesweeperBoard::new(4, 4, 0);
+
+        assert_eq!(sorted(board.neighbor_positions(0, 0)), vec![(0, 1), (1, 0), (1, 1)]);
+        assert_eq!(board.neighbor_positions(1, 1).len(), 8);
+    }
+
+    #[test]
+    fn count_mine_neighbors_counts_adjacent_mines() {
+        let board = board_with_mines(3, 3, &[(0, 0), (0, 1), (2, 2)]);
+
+        assert_eq!(board.count_mine_neighbors(1, 1), 3);
+        assert_eq!(board.count_mine_neighbors(2, 1), 1);
+    }
+}
