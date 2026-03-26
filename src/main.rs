@@ -154,6 +154,9 @@ struct MineCounterText;
 struct StatusText;
 
 #[derive(Component)]
+struct TimerText;
+
+#[derive(Component)]
 struct ResetButton;
 
 /// Set to true by the reset button; consumed by handle_reset.
@@ -167,6 +170,13 @@ struct ChordHighlight(Vec<(usize, usize)>);
 /// The revealed numbered cell currently being chord-held.
 #[derive(Resource, Default)]
 struct ChordAnchor(Option<(usize, usize)>);
+
+#[derive(Resource, Default)]
+struct GameTimer {
+    elapsed_seconds: u32,
+    running: bool,
+    accumulator: f32,
+}
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -190,10 +200,12 @@ fn main() {
         .insert_resource(ResetRequested::default())
         .insert_resource(ChordHighlight::default())
         .insert_resource(ChordAnchor::default())
+        .insert_resource(GameTimer::default())
         .add_systems(Startup, (setup_camera, setup_board, setup_ui))
         .add_systems(Update, handle_cell_click)
         .add_systems(Update, handle_reset_button)
         .add_systems(Update, handle_reset.after(handle_reset_button))
+        .add_systems(Update, update_timer)
         .add_systems(
             Update,
             update_cell_visuals
@@ -238,7 +250,7 @@ fn setup_board(mut commands: Commands, config: Res<BoardConfig>) {
 }
 
 fn setup_ui(mut commands: Commands, board: Res<Board>) {
-    // Top bar: mine counter | new-game button | status text
+    // Top bar: mine counter | timer | new-game button | status text
     commands
         .spawn((
             Node {
@@ -264,6 +276,16 @@ fn setup_ui(mut commands: Commands, board: Res<Board>) {
                 },
                 TextColor(Color::WHITE),
                 MineCounterText,
+            ));
+
+            parent.spawn((
+                Text::new("Time: 000"),
+                TextFont {
+                    font_size: 20.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                TimerText,
             ));
 
             parent
@@ -315,6 +337,7 @@ fn handle_cell_click(
     mut next_state: ResMut<NextState<GameState>>,
     current_state: Res<State<GameState>>,
     mut chord_anchor: ResMut<ChordAnchor>,
+    mut timer: ResMut<GameTimer>,
 ) {
     if *current_state.get() != GameState::Playing {
         return;
@@ -336,9 +359,11 @@ fn handle_cell_click(
     if chord_trigger {
         if let Some((anchor_x, anchor_y)) = chord_anchor.0.take() {
             if board.chord(anchor_x, anchor_y) {
+                timer.running = false;
                 next_state.set(GameState::Lost);
             } else if board.check_win() {
                 board.finalize_win();
+                timer.running = false;
                 next_state.set(GameState::Won);
             }
         }
@@ -371,12 +396,19 @@ fn handle_cell_click(
     // left_only: normal reveal (ignore clicks on already-revealed or flagged cells)
     match board.reveal_at(cx, cy) {
         RevealOutcome::Ignored => {}
-        RevealOutcome::HitMine => next_state.set(GameState::Lost),
+        RevealOutcome::HitMine => {
+            timer.running = false;
+            next_state.set(GameState::Lost);
+        }
         RevealOutcome::Safe if board.check_win() => {
+            timer.running = true;
             board.finalize_win();
+            timer.running = false;
             next_state.set(GameState::Won);
         }
-        RevealOutcome::Safe => {}
+        RevealOutcome::Safe => {
+            timer.running = true;
+        }
     }
 }
 
@@ -459,17 +491,23 @@ fn update_cell_visuals(
 
 fn update_ui(
     board: Res<Board>,
+    timer: Res<GameTimer>,
     game_state: Res<State<GameState>>,
     mut counter_q: Query<&mut Text, (With<MineCounterText>, Without<StatusText>)>,
+    mut timer_q: Query<&mut Text, (With<TimerText>, Without<MineCounterText>, Without<StatusText>)>,
     mut status_q: Query<(&mut Text, &mut TextColor), (With<StatusText>, Without<MineCounterText>)>,
 ) {
-    if !board.is_changed() && !game_state.is_changed() {
+    if !board.is_changed() && !game_state.is_changed() && !timer.is_changed() {
         return;
     }
 
     if let Ok(mut text) = counter_q.single_mut() {
         let remaining = board.mine_count() as i32 - board.flags_placed() as i32;
         text.0 = format!("Mines: {remaining}");
+    }
+
+    if let Ok(mut text) = timer_q.single_mut() {
+        text.0 = format!("Time: {:03}", timer.elapsed_seconds.min(999));
     }
 
     if let Ok((mut text, mut color)) = status_q.single_mut() {
@@ -487,6 +525,18 @@ fn update_ui(
                 color.0 = Color::srgb(0.9, 0.2, 0.2);
             }
         }
+    }
+}
+
+fn update_timer(time: Res<Time>, mut timer: ResMut<GameTimer>) {
+    if !timer.running {
+        return;
+    }
+
+    timer.accumulator += time.delta_secs();
+    while timer.accumulator >= 1.0 {
+        timer.accumulator -= 1.0;
+        timer.elapsed_seconds = timer.elapsed_seconds.saturating_add(1);
     }
 }
 
@@ -508,6 +558,7 @@ fn handle_reset(
     mut next_state: ResMut<NextState<GameState>>,
     mut highlight: ResMut<ChordHighlight>,
     mut chord_anchor: ResMut<ChordAnchor>,
+    mut timer: ResMut<GameTimer>,
 ) {
     if !reset_requested.0 {
         return;
@@ -516,6 +567,7 @@ fn handle_reset(
     *board = Board::from_config(*config);
     highlight.0.clear();
     chord_anchor.0 = None;
+    *timer = GameTimer::default();
     next_state.set(GameState::Playing);
 }
 
