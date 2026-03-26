@@ -208,6 +208,15 @@ impl MinesweeperBoard {
             .collect()
     }
 
+    pub fn chord_hint_cells(&self, x: usize, y: usize) -> Vec<(usize, usize)> {
+        let cell = &self.cells[x][y];
+        if !cell.revealed || cell.mine || cell.neighbor_mines == 0 {
+            return Vec::new();
+        }
+
+        self.hidden_unflagged_neighbors(x, y)
+    }
+
     pub fn chord_reveal_candidates(&self, x: usize, y: usize) -> Vec<(usize, usize)> {
         let cell = &self.cells[x][y];
         if !cell.revealed || cell.mine || cell.neighbor_mines == 0 {

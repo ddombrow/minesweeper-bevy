@@ -163,6 +163,10 @@ struct ResetRequested(bool);
 #[derive(Resource, Default)]
 struct ChordHighlight(Vec<(usize, usize)>);
 
+/// The revealed numbered cell currently being chord-held.
+#[derive(Resource, Default)]
+struct ChordAnchor(Option<(usize, usize)>);
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() {
@@ -184,6 +188,7 @@ fn main() {
         .insert_resource(Board::from_config(board_config))
         .insert_resource(ResetRequested::default())
         .insert_resource(ChordHighlight::default())
+        .insert_resource(ChordAnchor::default())
         .add_systems(Startup, (setup_camera, setup_board, setup_ui))
         .add_systems(Update, handle_cell_click)
         .add_systems(Update, handle_reset_button)
@@ -308,6 +313,7 @@ fn handle_cell_click(
     mut board: ResMut<Board>,
     mut next_state: ResMut<NextState<GameState>>,
     current_state: Res<State<GameState>>,
+    mut chord_anchor: ResMut<ChordAnchor>,
 ) {
     if *current_state.get() != GameState::Playing {
         return;
@@ -316,14 +322,24 @@ fn handle_cell_click(
     let right_pressed = mouse.just_pressed(MouseButton::Right);
     let left_released = mouse.just_released(MouseButton::Left);
     let right_released = mouse.just_released(MouseButton::Right);
-    let left_held = mouse.pressed(MouseButton::Left);
     let right_held = mouse.pressed(MouseButton::Right);
 
-    // Chord fires when either button is released while the other is still held
-    let chord_trigger = (left_released && right_held) || (right_released && left_held);
+    // If an active chord hold ends, resolve it from the stored anchor cell.
+    let chord_trigger = chord_anchor.0.is_some() && (left_released || right_released);
     let left_only = left_pressed && !right_held;
 
     if !chord_trigger && !left_only && !right_pressed {
+        return;
+    }
+
+    if chord_trigger {
+        if let Some((anchor_x, anchor_y)) = chord_anchor.0.take() {
+            if board.chord(anchor_x, anchor_y) {
+                next_state.set(GameState::Lost);
+            } else if board.check_win() {
+                next_state.set(GameState::Won);
+            }
+        }
         return;
     }
 
@@ -347,15 +363,6 @@ fn handle_cell_click(
     // board as changed every frame and thrash update_cell_visuals / the hint.
     if right_pressed && !board.is_revealed(cx, cy) {
         board.toggle_flag(cx, cy);
-    }
-
-    if chord_trigger {
-        if board.chord(cx, cy) {
-            next_state.set(GameState::Lost);
-        } else if board.check_win() {
-            next_state.set(GameState::Won);
-        }
-        return;
     }
 
     // left_only: normal reveal (ignore clicks on already-revealed or flagged cells)
@@ -482,6 +489,7 @@ fn handle_reset(
     mut board: ResMut<Board>,
     mut next_state: ResMut<NextState<GameState>>,
     mut highlight: ResMut<ChordHighlight>,
+    mut chord_anchor: ResMut<ChordAnchor>,
 ) {
     if !reset_requested.0 {
         return;
@@ -489,11 +497,12 @@ fn handle_reset(
     reset_requested.0 = false;
     *board = Board::from_config(*config);
     highlight.0.clear();
+    chord_anchor.0 = None;
     next_state.set(GameState::Playing);
 }
 
 /// While both mouse buttons are held over a revealed numbered cell, tint the
-/// unrevealed unflagged neighbors to show what would be chord-revealed.
+/// unrevealed unflagged neighbors with the classic "pressed" chord preview.
 /// Runs every frame after update_cell_visuals so the tint overrides base colors.
 fn update_chord_highlight(
     mouse: Res<ButtonInput<MouseButton>>,
@@ -502,12 +511,14 @@ fn update_chord_highlight(
     config: Res<BoardConfig>,
     board: Res<Board>,
     mut highlight: ResMut<ChordHighlight>,
+    mut chord_anchor: ResMut<ChordAnchor>,
     mut cell_q: Query<(&CellMarker, &mut Sprite)>,
 ) {
     let both_held = mouse.pressed(MouseButton::Left) && mouse.pressed(MouseButton::Right);
 
     // Compute which cells should be highlighted this frame
     let mut new_cells: Vec<(usize, usize)> = Vec::new();
+    let mut new_anchor = None;
     'compute: {
         if !both_held {
             break 'compute;
@@ -529,13 +540,15 @@ fn update_chord_highlight(
             break 'compute;
         };
 
-        new_cells = board.chord_reveal_candidates(cx, cy);
+        new_anchor = Some((cx, cy));
+        new_cells = board.chord_hint_cells(cx, cy);
     }
 
     let prev_cells = std::mem::replace(&mut highlight.0, new_cells.clone());
+    let prev_anchor = std::mem::replace(&mut chord_anchor.0, new_anchor);
 
     // Nothing changed and board didn't change → skip sprite work
-    if prev_cells == new_cells && !board.is_changed() {
+    if prev_cells == new_cells && prev_anchor == chord_anchor.0 && !board.is_changed() {
         return;
     }
 
