@@ -3,7 +3,7 @@ use bevy::window::{PrimaryWindow, WindowResolution};
 use std::ops::{Deref, DerefMut};
 
 mod minesweeper;
-use minesweeper::{CellFace, CellView, MinesweeperBoard, RevealOutcome};
+use minesweeper::{CellSnapshot, CellState, MinesweeperBoard, RevealOutcome};
 
 const CELL_SIZE: f32 = 36.0;
 const CELL_GAP: f32 = 2.0;
@@ -17,12 +17,12 @@ const COLOR_MINE: Color = Color::srgb(0.80, 0.15, 0.15);
 const COLOR_FLAG: Color = Color::srgb(0.85, 0.65, 0.10);
 const COLOR_CHORD_HINT: Color = Color::srgb(0.75, 0.75, 0.80);
 
-fn cell_base_color(cell: &CellView) -> Color {
-    match cell.face {
-        CellFace::Flagged => COLOR_FLAG,
-        CellFace::RevealedMine => COLOR_MINE,
-        CellFace::RevealedEmpty | CellFace::RevealedNumber(_) => COLOR_REVEALED,
-        CellFace::Hidden => COLOR_HIDDEN,
+fn cell_base_color(cell: &CellSnapshot) -> Color {
+    match cell.state {
+        CellState::Flagged => COLOR_FLAG,
+        CellState::RevealedMine => COLOR_MINE,
+        CellState::RevealedEmpty | CellState::RevealedNumber(_) => COLOR_REVEALED,
+        CellState::Hidden => COLOR_HIDDEN,
     }
 }
 
@@ -391,14 +391,14 @@ fn update_cell_visuals(
     }
 
     for (marker, mut sprite) in &mut cell_q {
-        let cell = board.cell_view(marker.x, marker.y);
+        let cell = board.cell_snapshot(marker.x, marker.y);
 
         sprite.color = cell_base_color(&cell);
 
         let pos = config.cell_world_pos(marker.x, marker.y);
 
-        match cell.face {
-            CellFace::Flagged => {
+        match cell.state {
+            CellState::Flagged => {
                 commands.spawn((
                     Text2d::new("F"),
                     TextFont {
@@ -410,7 +410,7 @@ fn update_cell_visuals(
                     CellText,
                 ));
             }
-            CellFace::RevealedMine => {
+            CellState::RevealedMine => {
                 commands.spawn((
                     Text2d::new("X"),
                     TextFont {
@@ -422,7 +422,7 @@ fn update_cell_visuals(
                     CellText,
                 ));
             }
-            CellFace::RevealedNumber(n) => {
+            CellState::RevealedNumber(n) => {
                 commands.spawn((
                     Text2d::new(n.to_string()),
                     TextFont {
@@ -434,7 +434,7 @@ fn update_cell_visuals(
                     CellText,
                 ));
             }
-            CellFace::Hidden | CellFace::RevealedEmpty => {}
+            CellState::Hidden | CellState::RevealedEmpty => {}
         }
     }
 }
@@ -562,7 +562,7 @@ fn update_chord_highlight(
         } else if was_prev {
             // Restore to base color (update_cell_visuals may have already done
             // this if the board changed, but it's harmless to redo it)
-            sprite.color = cell_base_color(&board.cell_view(marker.x, marker.y));
+            sprite.color = cell_base_color(&board.cell_snapshot(marker.x, marker.y));
         }
     }
 }

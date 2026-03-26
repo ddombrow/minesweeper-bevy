@@ -24,7 +24,7 @@ pub enum RevealOutcome {
     HitMine,
 }
 
-pub enum CellFace {
+pub enum CellState {
     Hidden,
     Flagged,
     RevealedEmpty,
@@ -32,8 +32,8 @@ pub enum CellFace {
     RevealedMine,
 }
 
-pub struct CellView {
-    pub face: CellFace,
+pub struct CellSnapshot {
+    pub state: CellState,
 }
 
 impl MinesweeperBoard {
@@ -72,21 +72,21 @@ impl MinesweeperBoard {
         self.cells[x][y].flagged
     }
 
-    pub fn cell_view(&self, x: usize, y: usize) -> CellView {
+    pub fn cell_snapshot(&self, x: usize, y: usize) -> CellSnapshot {
         let cell = &self.cells[x][y];
-        let face = if cell.flagged && !cell.revealed {
-            CellFace::Flagged
+        let state = if cell.flagged && !cell.revealed {
+            CellState::Flagged
         } else if cell.revealed && cell.mine {
-            CellFace::RevealedMine
+            CellState::RevealedMine
         } else if cell.revealed && cell.neighbor_mines > 0 {
-            CellFace::RevealedNumber(cell.neighbor_mines)
+            CellState::RevealedNumber(cell.neighbor_mines)
         } else if cell.revealed {
-            CellFace::RevealedEmpty
+            CellState::RevealedEmpty
         } else {
-            CellFace::Hidden
+            CellState::Hidden
         };
 
-        CellView { face }
+        CellSnapshot { state }
     }
 
     pub fn reveal_at(&mut self, x: usize, y: usize) -> RevealOutcome {
