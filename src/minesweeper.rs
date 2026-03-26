@@ -27,6 +27,7 @@ pub enum RevealOutcome {
 pub enum CellState {
     Hidden,
     Flagged,
+    Questioned,
     RevealedEmpty,
     RevealedNumber(u8),
     RevealedMine,
@@ -76,6 +77,8 @@ impl MinesweeperBoard {
         let cell = &self.cells[x][y];
         let state = if cell.flagged && !cell.revealed {
             CellState::Flagged
+        } else if cell.questioned && !cell.revealed {
+            CellState::Questioned
         } else if cell.revealed && cell.mine {
             CellState::RevealedMine
         } else if cell.revealed && cell.neighbor_mines > 0 {
@@ -179,9 +182,13 @@ impl MinesweeperBoard {
 
         if self.cells[x][y].flagged {
             self.cells[x][y].flagged = false;
+            self.cells[x][y].questioned = true;
             self.flags_placed = self.flags_placed.saturating_sub(1);
+        } else if self.cells[x][y].questioned {
+            self.cells[x][y].questioned = false;
         } else {
             self.cells[x][y].flagged = true;
+            self.cells[x][y].questioned = false;
             self.flags_placed += 1;
         }
     }
@@ -377,6 +384,7 @@ mod tests {
         board.cells[2][0].revealed = true;
         board.cells[2][0].mine = true;
         board.cells[0][1].revealed = true;
+        board.cells[1][1].questioned = true;
 
         assert!(matches!(
             board.cell_snapshot(0, 0).state,
@@ -396,7 +404,7 @@ mod tests {
         ));
         assert!(matches!(
             board.cell_snapshot(1, 1).state,
-            CellState::Hidden
+            CellState::Questioned
         ));
     }
 
@@ -462,13 +470,20 @@ mod tests {
     }
 
     #[test]
-    fn toggle_flag_updates_flag_count_and_ignores_revealed_cells() {
+    fn toggle_flag_cycles_flag_question_hidden_and_ignores_revealed_cells() {
         let mut board = MinesweeperBoard::new(2, 2, 0);
         board.cells[1][1].revealed = true;
 
         board.toggle_flag(0, 0);
         assert!(board.is_flagged(0, 0));
         assert_eq!(board.flags_placed(), 1);
+
+        board.toggle_flag(0, 0);
+        assert!(matches!(
+            board.cell_snapshot(0, 0).state,
+            CellState::Questioned
+        ));
+        assert_eq!(board.flags_placed(), 0);
 
         board.toggle_flag(0, 0);
         assert!(!board.is_flagged(0, 0));

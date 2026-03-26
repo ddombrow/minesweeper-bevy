@@ -20,6 +20,7 @@ const COLOR_CHORD_HINT: Color = Color::srgb(0.75, 0.75, 0.80);
 fn cell_base_color(cell: &CellSnapshot) -> Color {
     match cell.state {
         CellState::Flagged => COLOR_FLAG,
+        CellState::Questioned => COLOR_HIDDEN,
         CellState::RevealedMine => COLOR_MINE,
         CellState::RevealedEmpty | CellState::RevealedNumber(_) => COLOR_REVEALED,
         CellState::Hidden => COLOR_HIDDEN,
@@ -363,6 +364,7 @@ fn handle_cell_click(
     // board as changed every frame and thrash update_cell_visuals / the hint.
     if right_pressed && !board.is_revealed(cx, cy) {
         board.toggle_flag(cx, cy);
+        return;
     }
 
     // left_only: normal reveal (ignore clicks on already-revealed or flagged cells)
@@ -406,6 +408,18 @@ fn update_cell_visuals(
                         ..default()
                     },
                     TextColor(Color::srgb(0.85, 0.15, 0.15)),
+                    Transform::from_xyz(pos.x, pos.y, 1.0),
+                    CellText,
+                ));
+            }
+            CellState::Questioned => {
+                commands.spawn((
+                    Text2d::new("?"),
+                    TextFont {
+                        font_size: 20.0,
+                        ..default()
+                    },
+                    TextColor(Color::BLACK),
                     Transform::from_xyz(pos.x, pos.y, 1.0),
                     CellText,
                 ));
