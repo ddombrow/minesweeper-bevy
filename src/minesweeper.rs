@@ -201,6 +201,18 @@ impl MinesweeperBoard {
             .all(|cell| cell.revealed)
     }
 
+    pub fn finalize_win(&mut self) {
+        for row in &mut self.cells {
+            for cell in row {
+                if cell.mine {
+                    cell.flagged = true;
+                    cell.questioned = false;
+                }
+            }
+        }
+        self.flags_placed = self.mine_count;
+    }
+
     pub fn adjacent_flag_count(&self, x: usize, y: usize) -> u8 {
         self.neighbor_positions(x, y)
             .into_iter()
@@ -504,6 +516,19 @@ mod tests {
 
         board.cells[1][0].revealed = true;
         assert!(board.check_win());
+    }
+
+    #[test]
+    fn finalize_win_flags_all_mines_and_clears_question_marks() {
+        let mut board = board_with_mines(2, 2, &[(1, 1)]);
+        board.cells[1][1].questioned = true;
+        board.flags_placed = 0;
+
+        board.finalize_win();
+
+        assert!(board.cells[1][1].flagged);
+        assert!(!board.cells[1][1].questioned);
+        assert_eq!(board.flags_placed(), 1);
     }
 
     #[test]

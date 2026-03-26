@@ -338,6 +338,7 @@ fn handle_cell_click(
             if board.chord(anchor_x, anchor_y) {
                 next_state.set(GameState::Lost);
             } else if board.check_win() {
+                board.finalize_win();
                 next_state.set(GameState::Won);
             }
         }
@@ -371,7 +372,10 @@ fn handle_cell_click(
     match board.reveal_at(cx, cy) {
         RevealOutcome::Ignored => {}
         RevealOutcome::HitMine => next_state.set(GameState::Lost),
-        RevealOutcome::Safe if board.check_win() => next_state.set(GameState::Won),
+        RevealOutcome::Safe if board.check_win() => {
+            board.finalize_win();
+            next_state.set(GameState::Won);
+        }
         RevealOutcome::Safe => {}
     }
 }
