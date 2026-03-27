@@ -16,6 +16,7 @@ pub struct MinesweeperBoard {
     cells: Vec<Vec<CellData>>, // [x][y]
     first_click: bool,
     flags_placed: usize,
+    exploded_mine: Option<(usize, usize)>,
 }
 
 pub enum RevealOutcome {
@@ -31,6 +32,7 @@ pub enum CellState {
     RevealedEmpty,
     RevealedNumber(u8),
     RevealedMine,
+    ExplodedMine,
 }
 
 pub struct CellSnapshot {
@@ -46,6 +48,7 @@ impl MinesweeperBoard {
             cells: vec![vec![CellData::default(); height as usize]; width as usize],
             first_click: true,
             flags_placed: 0,
+            exploded_mine: None,
         }
     }
 
@@ -75,7 +78,9 @@ impl MinesweeperBoard {
 
     pub fn cell_snapshot(&self, x: usize, y: usize) -> CellSnapshot {
         let cell = &self.cells[x][y];
-        let state = if cell.flagged && !cell.revealed {
+        let state = if self.exploded_mine == Some((x, y)) {
+            CellState::ExplodedMine
+        } else if cell.flagged && !cell.revealed {
             CellState::Flagged
         } else if cell.questioned && !cell.revealed {
             CellState::Questioned
@@ -153,6 +158,7 @@ impl MinesweeperBoard {
         }
 
         if self.cells[x][y].mine {
+            self.exploded_mine = Some((x, y));
             self.reveal_all_mines();
             return true;
         }
@@ -529,6 +535,21 @@ mod tests {
         assert!(board.cells[1][1].flagged);
         assert!(!board.cells[1][1].questioned);
         assert_eq!(board.flags_placed(), 1);
+    }
+
+    #[test]
+    fn clicked_mine_is_marked_as_exploded() {
+        let mut board = board_with_mines(2, 2, &[(1, 1)]);
+
+        assert!(board.reveal(1, 1));
+        assert!(matches!(
+            board.cell_snapshot(1, 1).state,
+            CellState::ExplodedMine
+        ));
+        assert!(matches!(
+            board.cell_snapshot(0, 0).state,
+            CellState::Hidden
+        ));
     }
 
     #[test]
